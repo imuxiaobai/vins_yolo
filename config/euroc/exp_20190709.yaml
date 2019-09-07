@@ -1,0 +1,80 @@
+%YAML:1.0
+
+#common parameters
+#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam; 
+imu: 1         
+num_of_cam: 2  
+
+# imu_topic: "/imu_ns/imu/imu_drop"
+# imu_topic: "/imu_ns/imu/imu"
+imu_topic: "/imu_ns/imu/imu_filter"
+image0_topic: "/camera_ns/stereo/left/image_raw"
+image1_topic: "/camera_ns/stereo/right/image_raw"
+output_path: "/home/work/vins_ws/src/VINS-Fusion/config/output"
+
+cam0_calib: "cam_left_0709.yaml"
+cam1_calib: "cam_right_0709.yaml"
+image_width: 752
+image_height: 480
+   
+
+# Extrinsic parameter between IMU and Camera.
+estimate_extrinsic: 0   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
+                        # 1  Have an initial guess about extrinsic parameters. We will optimize around your initial guess.
+
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ 0.01189504,  0.01699681,  0.99978479,  0.03050286,
+           -0.99990494, -0.00676984,  0.01201156,  0.09330873,
+           0.00697254, -0.99983262,  0.01691467,  0.02591658,
+           0, 0, 0, 1 ]
+#    data: [ 0.00313422,  0.01374308,  0.99990065,  0.03518542,
+#            -0.99971866,  0.02355238,  0.00280994,  0.12337551,
+#            -0.02351142, -0.99962814,  0.01381303, -0.05746056,
+#            0, 0, 0, 1 ]
+
+body_T_cam1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ 0.00243869,  0.00411299,  0.99998857,  0.02875835,
+           -0.99998787, -0.00427,     0.00245625, -0.10771663,
+           0.00428005, -0.99998243,  0.00410253,  0.02625551,
+           0, 0, 0, 1 ]
+
+#Multiple thread support
+multiple_thread: 1
+
+#feature traker paprameters
+max_cnt: 150            # max feature number in feature tracking
+min_dist: 20            # min distance between two features 
+freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image 
+F_threshold: 1.0        # ransac threshold (pixel)
+show_track: 1           # publish tracking image as topic
+flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
+
+#optimization parameters
+max_solver_time: 0.04  # max solver itration time (ms), to guarantee real time
+max_num_iterations: 8   # max solver itrations, to guarantee real time
+keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+
+#imu parameters       The more accurate parameters you provide, the better performance
+acc_n: 0.27 #0.15 #0.20 #0.27 #0.2 #0.1          # accelerometer measurement noise standard deviation. 
+gyr_n: 0.20 #0.04 #0.10 #0.20 #0.05 #0.01         # gyroscope measurement noise standard deviation.     
+acc_w: 0.00046 #0.0013 #0.002 #0.001        # accelerometer bias random work noise standard deviation.  
+gyr_w: 0.00038 #0.00012 #0.0004 #0.0001       # gyroscope bias random work noise standard deviation.     
+g_norm: 9.81007     # gravity magnitude
+
+#unsynchronization parameters
+estimate_td: 0                      # online estimate time offset between camera and imu
+td: 0.0                             # initial value of time offset. unit: s. readed image clock + td = real image clock (IMU clock)
+
+#loop closure parameters
+load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
+pose_graph_save_path: "~/vins_fusion_new_ws/src/VINS-Fusion/config/output/pose_graph/" # save and load path
+save_image: 0                   # save image in pose graph for visualization prupose; you can close this function by setting 0 
+
+# mask: 1
+# fisheye_mask: "/home/vins_ws/src/VINS-Mono/config/test.jpg"

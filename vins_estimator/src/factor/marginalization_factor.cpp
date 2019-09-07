@@ -341,7 +341,7 @@ MarginalizationFactor::MarginalizationFactor(MarginalizationInfo* _marginalizati
         cnt += it;
     }
     //printf("residual size: %d, %d\n", cnt, n);
-    set_num_residuals(marginalization_info->n);
+    set_num_residuals(marginalization_info->n); //上一次边缘化后保留下的 要优化变量的个数 v,bias为9 pq为6
 };
 
 bool MarginalizationFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
@@ -359,8 +359,8 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
     Eigen::VectorXd dx(n);
     for (int i = 0; i < static_cast<int>(marginalization_info->keep_block_size.size()); i++)
     {
-        int size = marginalization_info->keep_block_size[i];
-        int idx = marginalization_info->keep_block_idx[i] - m;
+        int size = marginalization_info->keep_block_size[i];    //global_size
+        int idx = marginalization_info->keep_block_idx[i] - m;  //local_size - 要marg掉的变量个数
         Eigen::VectorXd x = Eigen::Map<const Eigen::VectorXd>(parameters[i], size);
         Eigen::VectorXd x0 = Eigen::Map<const Eigen::VectorXd>(marginalization_info->keep_block_data[i], size);
         if (size != 7)

@@ -17,7 +17,7 @@
 #include <sensor_msgs/PointCloud.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
-#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/FluidPressure.h>
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PointStamped.h>
@@ -38,12 +38,11 @@ extern ros::Publisher pub_key;
 extern nav_msgs::Path path;
 extern ros::Publisher pub_pose_graph;
 extern int IMAGE_ROW, IMAGE_COL;
+extern ros::Publisher pub_image;
 
 void registerPub(ros::NodeHandle &n);
 
 void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, const Eigen::Vector3d &V, double t);
-
-void pubTrackImage(const cv::Mat &imgTrack, const double t);
 
 void printStatistics(const Estimator &estimator, double t);
 

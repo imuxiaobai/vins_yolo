@@ -45,7 +45,7 @@ int MIN_DIST;
 double F_THRESHOLD;
 int SHOW_TRACK;
 int FLOW_BACK;
-
+int mask;
 
 template <typename T>
 T readParam(ros::NodeHandle &n, std::string name)
@@ -195,6 +195,9 @@ void readParameters(std::string config_file)
         ESTIMATE_TD = 0;
         printf("no imu, fix extrinsic param; no time offset calibration\n");
     }
+
+    if (mask == 1)
+        FISHEYE_MASK = configPath + "/" + "fisheye_mask.jpg";
 
     fsSettings.release();
 }

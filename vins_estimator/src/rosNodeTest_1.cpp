@@ -20,10 +20,6 @@
 #include "estimator/estimator.h"
 #include "estimator/parameters.h"
 #include "utility/visualization.h"
-// #include <test_msgs/BoundingBox.h>
-// #include <test_msgs/BoundingBoxes.h>
-#include <darknet_ros_msgs/BoundingBox.h>
-#include <darknet_ros_msgs/BoundingBoxes.h>
 
 Estimator estimator;
 
@@ -31,71 +27,19 @@ queue<sensor_msgs::ImuConstPtr> imu_buf;
 queue<sensor_msgs::PointCloudConstPtr> feature_buf;
 queue<sensor_msgs::ImageConstPtr> img0_buf;
 queue<sensor_msgs::ImageConstPtr> img1_buf;
+queue<sensor_msgs::FluidPressurePtr> lidar_buf;
 std::mutex m_buf;
 
-// const double _dt = 0.2;
-const double _dt = 1;
-double dt = 0;
-// pair<ros::Time, vector<Box>> _box;
-vector<Box> input_box;
-
-// struct Box{
-//     ros::Time _img_time;
-//     ros::Time _time;
-//     int64_t _xmax;
-//     int64_t _xmin;
-//     int64_t _ymax;
-//     int64_t _ymin;
-//     string _class;
-//     double  _probability;
-// };
-
-queue<pair<ros::Time, vector<Box>>> box;
-void box_callback(const darknet_ros_msgs::BoundingBoxes &msg){
-    vector<Box> box_buf;
-    Box _box;
-    darknet_ros_msgs::BoundingBox _bounding_box;
-    uint idx = 0;
-    
-    _box._img_time = msg.image_header.stamp;
-    _box._time = msg.image_header.stamp;
-    for(idx = 0; idx < msg.bounding_boxes.size(); idx++){
-        _bounding_box = (msg.bounding_boxes.at(idx));
-        _box._xmax = _bounding_box.xmax;
-        _box._xmin = _bounding_box.xmin;
-        _box._ymax = _bounding_box.ymax;
-        _box._ymin = _bounding_box.ymin;
-        _box._class = _bounding_box.Class;
-        _box._probability = _bounding_box.probability;
-        box_buf.push_back(_box);
-    }
-
+void lidar_callback(const sensor_msgs::FluidPressurePtr &lidar_msg){
     m_buf.lock();
-
-    // box.push(make_pair<ros::Time, vector<Box>>(_box._img_time, box_buf));
-    box.push(make_pair(_box._img_time, box_buf));
-    
-    while(box.size()>20){
-        box.pop();
-    }
+    lidar_buf.push(lidar_msg);
     m_buf.unlock();
-
-    std::cout << "yolo_img_time: " << _box._img_time.toSec() << std::endl;
-    for(uint i=0;i<box_buf.size();i++){
-        std::cout << box_buf.at(i)._class << ":" << box_buf.at(i)._probability << std::endl;
-        // std::cout << msg.bounding_boxes.size() << std::endl;
-    }
-    std::cout << std::endl;
-    box_buf.clear();
-   
-
 }
 
 void img0_callback(const sensor_msgs::ImageConstPtr &img_msg)
 {
     m_buf.lock();
     img0_buf.push(img_msg);
-    // std::cout << "raw_img_time: " << img_msg->header.stamp.toSec() << std::endl;
     m_buf.unlock();
 }
 
@@ -170,34 +114,11 @@ void sync_process()
                     // std::cout << "sysnc dt: " << ros::Time::now().toSec() - time0 << std::endl;
                     //printf("find img0 and img1\n");
                 }
-                while (!box.empty()){
-                    dt = time - box.front().first.toSec();
-                    // std::cout <<"dt:" <<  dt << std::endl;
-                    if(dt <= _dt){
-                        input_box = box.front().second;
-                        // estimator.inputBox(box.front());
-                        box.pop();
-                        // break;
-                    }
-                    else if(dt > _dt){
-                        box.pop();
-                    }
-                    else {
-                        break;
-                    }
-                }
-                if(!input_box.empty()) {
-                    std::cout <<"dt:" <<  dt << std::endl;
-                    // estimator.inputBox(_box);
-                }  
             }
             m_buf.unlock();
-            if(!image0.empty() && !input_box.empty())
-                estimator.inputImage(time, input_box, image0, image1);
-            else if(!image0.empty())
+            if(!image0.empty())
                 estimator.inputImage(time, image0, image1);
             // std::cout << "ddt: " << ros::Time::now().toSec() - _s_t.toSec() << std::endl;
-            input_box.clear();
         }
         else
         {
@@ -315,12 +236,13 @@ int main(int argc, char **argv)
     ROS_WARN("waiting for image and imu...");
 
     registerPub(n);
-    ros::Subscriber bounding_sub = n.subscribe("/darknet_ros/bounding_boxes", 10, box_callback); 
+
     ros::Subscriber sub_imu = n.subscribe(IMU_TOPIC, 50, imu_callback, ros::TransportHints().tcpNoDelay());
     ros::Subscriber sub_feature = n.subscribe("/feature_tracker/feature", 20, feature_callback);
     ros::Subscriber sub_img0 = n.subscribe(IMAGE0_TOPIC, 10, img0_callback);
     ros::Subscriber sub_img1 = n.subscribe(IMAGE1_TOPIC, 10, img1_callback);
-
+    ros::Subscriber sub_lidar = n.subscribe("/lidar_ns/lidar_raw", 10, lidar_callback);
+    // ros::Subscriber sub_lidar = n.subscribe("/lidar_ns/lidar_raw", 10, lidar_callback);
     std::thread sync_thread{sync_process};
     ros::spin();
 

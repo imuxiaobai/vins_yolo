@@ -19,15 +19,35 @@
 #include <opencv2/opencv.hpp>
 #include <eigen3/Eigen/Dense>
 
+#include <ros/ros.h>
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
+#include <image_transport/image_transport.h>
+#include <opencv2/imgproc/imgproc.hpp>      //图像处理
+#include <opencv2/highgui/highgui.hpp>       //opencv GUI
+
 #include "camodocal/camera_models/CameraFactory.h"
 #include "camodocal/camera_models/CataCamera.h"
 #include "camodocal/camera_models/PinholeCamera.h"
 #include "../estimator/parameters.h"
 #include "../utility/tic_toc.h"
+// #include "../estimator/estimator.h"
 
 using namespace std;
 using namespace camodocal;
 using namespace Eigen;
+
+struct Box{
+    ros::Time _img_time;
+    ros::Time _time;
+    int64_t _xmax;
+    int64_t _xmin;
+    int64_t _ymax;
+    int64_t _ymin;
+    string _class;
+    double  _probability;
+};
 
 bool inBorder(const cv::Point2f &pt);
 void reduceVector(vector<cv::Point2f> &v, vector<uchar> status);
@@ -38,7 +58,10 @@ class FeatureTracker
 public:
     FeatureTracker();
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> trackImage(double _cur_time, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
+    map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> trackImage(double _cur_time, const vector<Box> &_box, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
+    void setBox();
     void setMask();
+    void addPoints();
     void readIntrinsicParameter(const vector<string> &calib_file);
     void showUndistortion(const string &name);
     void rejectWithF();
@@ -48,7 +71,8 @@ public:
                                     map<int, cv::Point2f> &cur_id_pts, map<int, cv::Point2f> &prev_id_pts);
     void showTwoImage(const cv::Mat &img1, const cv::Mat &img2, 
                       vector<cv::Point2f> pts1, vector<cv::Point2f> pts2);
-    void drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight, 
+    // void drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight, 
+    void drawTrack(const double &t, const cv::Mat &imLeft, const cv::Mat &imRight, 
                                    vector<int> &curLeftIds,
                                    vector<cv::Point2f> &curLeftPts, 
                                    vector<cv::Point2f> &curRightPts,
@@ -81,4 +105,5 @@ public:
     bool stereo_cam;
     int n_id;
     bool hasPrediction;
+    int box_use_time = 0;
 };

@@ -35,24 +35,38 @@
 #include "../factor/projectionTwoFrameTwoCamFactor.h"
 #include "../factor/projectionOneFrameTwoCamFactor.h"
 #include "../featureTracker/feature_tracker.h"
+#include <image_transport/image_transport.h>
+#include <cv_bridge/cv_bridge.h>
 
+// struct Box{
+//     ros::Time _img_time;
+//     ros::Time _time;
+//     int64_t _xmax;
+//     int64_t _xmin;
+//     int64_t _ymax;
+//     int64_t _ymin;
+//     string _class;
+//     double  _probability;
+// };
 
 class Estimator
 {
   public:
     Estimator();
-    ~Estimator();
+
     void setParameter();
 
     // interface
     void initFirstPose(Eigen::Vector3d p, Eigen::Matrix3d r);
     void inputIMU(double t, const Vector3d &linearAcceleration, const Vector3d &angularVelocity);
     void inputFeature(double t, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &featureFrame);
+    void inputBox(const pair<ros::Time, vector<Box>> &box_buf);
+    // void inputBox(const box &box_buf);
     void inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
+    void inputImage(double t, const vector<Box> &_box, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
     void processIMU(double t, double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity);
     void processImage(const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, const double header);
     void processMeasurements();
-    void changeSensorType(int use_imu, int use_stereo);
 
     // internal
     void clearState();
@@ -92,7 +106,6 @@ class Estimator
         MARGIN_SECOND_NEW = 1
     };
 
-    std::mutex mProcess;
     std::mutex mBuf;
     queue<pair<double, Eigen::Vector3d>> accBuf;
     queue<pair<double, Eigen::Vector3d>> gyrBuf;
@@ -172,5 +185,9 @@ class Estimator
     Eigen::Quaterniond latest_Q;
 
     bool initFirstPoseFlag;
-    bool initThreadFlag;
+
+    ros::Publisher _tk_image_pub;
+
+    std::pair<ros::Time, vector<Box>> box;
+
 };

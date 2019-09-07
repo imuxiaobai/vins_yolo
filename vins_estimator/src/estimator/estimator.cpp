@@ -13,29 +13,7 @@
 Estimator::Estimator(): f_manager{Rs}
 {
     ROS_INFO("init begins");
-    initThreadFlag = false;
     clearState();
-}
-
-Estimator::~Estimator()
-{
-    if (MULTIPLE_THREAD)
-    {
-        processThread.join();
-        printf("join thread \n");
-    }
-}
-
-void Estimator::clearState()
-{
-    mProcess.lock();
-    while(!accBuf.empty())
-        accBuf.pop();
-    while(!gyrBuf.empty())
-        gyrBuf.pop();
-    while(!featureBuf.empty())
-        featureBuf.pop();
-
     prevTime = -1;
     curTime = 0;
     openExEstimation = 0;
@@ -43,58 +21,10 @@ void Estimator::clearState()
     initR = Eigen::Matrix3d::Identity();
     inputImageCnt = 0;
     initFirstPoseFlag = false;
-
-    for (int i = 0; i < WINDOW_SIZE + 1; i++)
-    {
-        Rs[i].setIdentity();
-        Ps[i].setZero();
-        Vs[i].setZero();
-        Bas[i].setZero();
-        Bgs[i].setZero();
-        dt_buf[i].clear();
-        linear_acceleration_buf[i].clear();
-        angular_velocity_buf[i].clear();
-
-        if (pre_integrations[i] != nullptr)
-        {
-            delete pre_integrations[i];
-        }
-        pre_integrations[i] = nullptr;
-    }
-
-    for (int i = 0; i < NUM_OF_CAM; i++)
-    {
-        tic[i] = Vector3d::Zero();
-        ric[i] = Matrix3d::Identity();
-    }
-
-    first_imu = false,
-    sum_of_back = 0;
-    sum_of_front = 0;
-    frame_count = 0;
-    solver_flag = INITIAL;
-    initial_timestamp = 0;
-    all_image_frame.clear();
-
-    if (tmp_pre_integration != nullptr)
-        delete tmp_pre_integration;
-    if (last_marginalization_info != nullptr)
-        delete last_marginalization_info;
-
-    tmp_pre_integration = nullptr;
-    last_marginalization_info = nullptr;
-    last_marginalization_parameter_blocks.clear();
-
-    f_manager.clearState();
-
-    failure_occur = 0;
-
-    mProcess.unlock();
 }
 
 void Estimator::setParameter()
 {
-    mProcess.lock();
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         tic[i] = TIC[i];
@@ -111,69 +41,30 @@ void Estimator::setParameter()
     featureTracker.readIntrinsicParameter(CAM_NAMES);
 
     std::cout << "MULTIPLE_THREAD is " << MULTIPLE_THREAD << '\n';
-    if (MULTIPLE_THREAD && !initThreadFlag)
+    if (MULTIPLE_THREAD)
     {
-        initThreadFlag = true;
-        processThread = std::thread(&Estimator::processMeasurements, this);
-    }
-    mProcess.unlock();
-}
-
-void Estimator::changeSensorType(int use_imu, int use_stereo)
-{
-    bool restart = false;
-    mProcess.lock();
-    if(!use_imu && !use_stereo)
-        printf("at least use two sensors! \n");
-    else
-    {
-        if(USE_IMU != use_imu)
-        {
-            USE_IMU = use_imu;
-            if(USE_IMU)
-            {
-                // reuse imu; restart system
-                restart = true;
-            }
-            else
-            {
-                if (last_marginalization_info != nullptr)
-                    delete last_marginalization_info;
-
-                tmp_pre_integration = nullptr;
-                last_marginalization_info = nullptr;
-                last_marginalization_parameter_blocks.clear();
-            }
-        }
-        
-        STEREO = use_stereo;
-        printf("use imu %d use stereo %d\n", USE_IMU, STEREO);
-    }
-    mProcess.unlock();
-    if(restart)
-    {
-        clearState();
-        setParameter();
+        processThread   = std::thread(&Estimator::processMeasurements, this);
     }
 }
+void Estimator::inputBox(const pair<ros::Time, vector<Box>> &box_buf){
+    //todo
+    // if(box_buf.second.empty()){return;}
 
+    // ros::Time _box_time = box_buf.first();
+    // vector<Box> _box = box_buf.second();
+
+}
 void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
 {
     inputImageCnt++;
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     TicToc featureTrackerTime;
-
     if(_img1.empty())
         featureFrame = featureTracker.trackImage(t, _img);
     else
         featureFrame = featureTracker.trackImage(t, _img, _img1);
-    //printf("featureTracker time: %f\n", featureTrackerTime.toc());
 
-    if (SHOW_TRACK)
-    {
-        cv::Mat imgTrack = featureTracker.getTrackImage();
-        pubTrackImage(imgTrack, t);
-    }
+    // printf("featureTracker time: %f\n", featureTrackerTime.toc());
     
     if(MULTIPLE_THREAD)  
     {     
@@ -191,7 +82,41 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
         mBuf.unlock();
         TicToc processTime;
         processMeasurements();
-        printf("process time: %f\n", processTime.toc());
+        // printf("process time: %f\n", processTime.toc());
+    }
+    
+}
+
+void Estimator::inputImage(double t, const vector<Box> &_box, const cv::Mat &_img, const cv::Mat &_img1)
+{
+    inputImageCnt++;
+    map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
+    TicToc featureTrackerTime;
+    if(_img1.empty())
+        featureFrame = featureTracker.trackImage(t, _img);
+    else if(_box.empty())
+        featureFrame = featureTracker.trackImage(t, _img, _img1);
+    else
+        featureFrame = featureTracker.trackImage(t, _box, _img, _img1);
+    // printf("featureTracker time: %f\n", featureTrackerTime.toc());
+    
+    if(MULTIPLE_THREAD)  
+    {     
+        if(inputImageCnt % 2 == 0)
+        {
+            mBuf.lock();
+            featureBuf.push(make_pair(t, featureFrame));
+            mBuf.unlock();
+        }
+    }
+    else
+    {
+        mBuf.lock();
+        featureBuf.push(make_pair(t, featureFrame));
+        mBuf.unlock();
+        TicToc processTime;
+        processMeasurements();
+        // printf("process time: %f\n", processTime.toc());
     }
     
 }
@@ -307,10 +232,12 @@ void Estimator::processMeasurements()
                         dt = curTime - accVector[i - 1].first;
                     else
                         dt = accVector[i].first - accVector[i - 1].first;
+
+                    // printf("imu dt : %f\n", dt);
                     processIMU(accVector[i].first, dt, accVector[i].second, gyrVector[i].second);
                 }
             }
-            mProcess.lock();
+
             processImage(feature.second, feature.first);
             prevTime = curTime;
 
@@ -326,7 +253,6 @@ void Estimator::processMeasurements()
             pubPointCloud(*this, header);
             pubKeyframe(*this);
             pubTF(*this, header);
-            mProcess.unlock();
         }
 
         if (! MULTIPLE_THREAD)
@@ -368,6 +294,54 @@ void Estimator::initFirstPose(Eigen::Vector3d p, Eigen::Matrix3d r)
 }
 
 
+void Estimator::clearState()
+{
+    for (int i = 0; i < WINDOW_SIZE + 1; i++)
+    {
+        Rs[i].setIdentity();
+        Ps[i].setZero();
+        Vs[i].setZero();
+        Bas[i].setZero();
+        Bgs[i].setZero();
+        dt_buf[i].clear();
+        linear_acceleration_buf[i].clear();
+        angular_velocity_buf[i].clear();
+
+        if (pre_integrations[i] != nullptr)
+        {
+            delete pre_integrations[i];
+        }
+        pre_integrations[i] = nullptr;
+    }
+
+    for (int i = 0; i < NUM_OF_CAM; i++)
+    {
+        tic[i] = Vector3d::Zero();
+        ric[i] = Matrix3d::Identity();
+    }
+
+    first_imu = false,
+    sum_of_back = 0;
+    sum_of_front = 0;
+    frame_count = 0;
+    solver_flag = INITIAL;
+    initial_timestamp = 0;
+    all_image_frame.clear();
+
+    if (tmp_pre_integration != nullptr)
+        delete tmp_pre_integration;
+    if (last_marginalization_info != nullptr)
+        delete last_marginalization_info;
+
+    tmp_pre_integration = nullptr;
+    last_marginalization_info = nullptr;
+    last_marginalization_parameter_blocks.clear();
+
+    f_manager.clearState();
+
+    failure_occur = 0;
+}
+
 void Estimator::processIMU(double t, double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
 {
     if (!first_imu)
@@ -399,6 +373,8 @@ void Estimator::processIMU(double t, double dt, const Vector3d &linear_accelerat
         Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
         Ps[j] += dt * Vs[j] + 0.5 * dt * dt * un_acc;
         Vs[j] += dt * un_acc;
+        // std::cout << "Ps: " << Ps[j].transpose() << std::endl;
+        // std::cout << "Vs: " << Vs[j].transpose() << std::endl;
     }
     acc_0 = linear_acceleration;
     gyr_0 = angular_velocity; 
@@ -421,7 +397,8 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
 
     ROS_DEBUG("%s", marginalization_flag ? "Non-keyframe" : "Keyframe");
     ROS_DEBUG("Solving %d", frame_count);
-    ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
+    // ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
+    // ROS_INFO("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
 
     ImageFrame imageframe(image, header);
@@ -565,6 +542,18 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         last_P = Ps[WINDOW_SIZE];
         last_R0 = Rs[0];
         last_P0 = Ps[0];
+        
+        cv::Mat _ftimage = featureTracker.getTrackImage();
+
+        // cv_bridge::CvImage temp_out_msg;
+        // temp_out_msg.header.stamp = ros::Time::now();
+        // temp_out_msg.encoding = sensor_msgs::image_encodings::MONO8;
+        // temp_out_msg.image = _ftimage;
+
+        // std::cout << "Ps[0]: " << Ps[0].transpose() << std::endl;
+        // std::cout << "Rs[0]: " << Rs[0] << std::endl;
+        // std::cout << "Ps[WS]: " << Ps[WINDOW_SIZE].transpose() << std::endl;
+        // std::cout << "Rs[WS]: " << Rs[WINDOW_SIZE] << std::endl;
         updateLatestStates();
     }  
 }
@@ -841,7 +830,8 @@ void Estimator::vector2double()
         para_Ex_Pose[i][0] = tic[i].x();
         para_Ex_Pose[i][1] = tic[i].y();
         para_Ex_Pose[i][2] = tic[i].z();
-        Quaterniond q{ric[i]};
+        Quaterniond temp_q{ric[i]};
+        Quaterniond q = temp_q.normalized();
         para_Ex_Pose[i][3] = q.x();
         para_Ex_Pose[i][4] = q.y();
         para_Ex_Pose[i][5] = q.z();
@@ -875,11 +865,13 @@ void Estimator::double2vector()
                                                           para_Pose[0][4],
                                                           para_Pose[0][5]).toRotationMatrix());
         double y_diff = origin_R0.x() - origin_R00.x();
+        // printf("y_diff: %f\n", y_diff);
+        // double y_diff = 0.0f;
         //TODO
         Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
         if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0)
         {
-            ROS_DEBUG("euler singular point!");
+            ROS_WARN("euler singular point!");
             rot_diff = Rs[0] * Quaterniond(para_Pose[0][6],
                                            para_Pose[0][3],
                                            para_Pose[0][4],
@@ -924,13 +916,24 @@ void Estimator::double2vector()
     {
         for (int i = 0; i < NUM_OF_CAM; i++)
         {
-            tic[i] = Vector3d(para_Ex_Pose[i][0],
-                              para_Ex_Pose[i][1],
-                              para_Ex_Pose[i][2]);
-            ric[i] = Quaterniond(para_Ex_Pose[i][6],
-                                 para_Ex_Pose[i][3],
-                                 para_Ex_Pose[i][4],
-                                 para_Ex_Pose[i][5]).toRotationMatrix();
+            
+            if (ESTIMATE_EXTRINSIC) {
+                tic[i] = Vector3d(para_Ex_Pose[i][0],
+                                para_Ex_Pose[i][1],
+                                para_Ex_Pose[i][2]);
+                ric[i] = Quaterniond(para_Ex_Pose[i][6],
+                                    para_Ex_Pose[i][3],
+                                    para_Ex_Pose[i][4],
+                                    para_Ex_Pose[i][5]).normalized().toRotationMatrix();
+            // } else {
+            //     cout << Vector3d(para_Ex_Pose[i][0],
+            //                     para_Ex_Pose[i][1],
+            //                     para_Ex_Pose[i][2]) << endl;
+            //     cout << Quaterniond(para_Ex_Pose[i][6],
+            //                         para_Ex_Pose[i][3],
+            //                         para_Ex_Pose[i][4],
+            //                         para_Ex_Pose[i][5]).normalized().toRotationMatrix() << endl;
+            }
         }
     }
 
@@ -941,6 +944,8 @@ void Estimator::double2vector()
 
     if(USE_IMU)
         td = para_Td[0][0];
+
+    // printf("optimal: %f\n", td);
 
 }
 
@@ -1020,12 +1025,12 @@ void Estimator::optimization()
         problem.AddParameterBlock(para_Ex_Pose[i], SIZE_POSE, local_parameterization);
         if ((ESTIMATE_EXTRINSIC && frame_count == WINDOW_SIZE && Vs[0].norm() > 0.2) || openExEstimation)
         {
-            //ROS_INFO("estimate extinsic param");
+            // ROS_INFO("estimate extinsic param");
             openExEstimation = 1;
         }
         else
         {
-            //ROS_INFO("fix extinsic param");
+            // ROS_INFO("fix extinsic param");
             problem.SetParameterBlockConstant(para_Ex_Pose[i]);
         }
     }
@@ -1034,7 +1039,7 @@ void Estimator::optimization()
     if (!ESTIMATE_TD || Vs[0].norm() < 0.2)
         problem.SetParameterBlockConstant(para_Td[0]);
 
-    if (last_marginalization_info && last_marginalization_info->valid)
+    if (last_marginalization_info && last_marginalization_info->valid)  //把上一次先验项中的殘差项（尺寸为n）
     {
         // construct new marginlization_factor
         MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
@@ -1118,7 +1123,7 @@ void Estimator::optimization()
     TicToc t_solver;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
-    //cout << summary.BriefReport() << endl;
+    // cout << summary.BriefReport() << endl;
     ROS_DEBUG("Iterations : %d", static_cast<int>(summary.iterations.size()));
     //printf("solver costs: %f \n", t_solver.toc());
 
@@ -1127,7 +1132,7 @@ void Estimator::optimization()
 
     if(frame_count < WINDOW_SIZE)
         return;
-
+//
     TicToc t_whole_marginalization;
     if (marginalization_flag == MARGIN_OLD)
     {

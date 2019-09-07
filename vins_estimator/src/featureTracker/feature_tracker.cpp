@@ -10,6 +10,7 @@
  *******************************************************/
 
 #include "feature_tracker.h"
+#include "../utility/visualization.h"
 
 bool FeatureTracker::inBorder(const cv::Point2f &pt)
 {
@@ -52,9 +53,16 @@ FeatureTracker::FeatureTracker()
     hasPrediction = false;
 }
 
+void FeatureTracker::setBox()
+{
+    // todo box
+}
+
 void FeatureTracker::setMask()
 {
-    mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+
+    // mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    mask = fisheye_mask.clone();
 
     // prefer to keep features that are tracked for long time
     vector<pair<int, pair<cv::Point2f, int>>> cnt_pts_id;
@@ -83,6 +91,16 @@ void FeatureTracker::setMask()
     }
 }
 
+void FeatureTracker::addPoints()
+{
+    for (auto &p : n_pts)
+    {
+        cur_pts.push_back(p);
+        ids.push_back(n_id++);
+        track_cnt.push_back(1);
+    }
+}
+
 double FeatureTracker::distance(cv::Point2f &pt1, cv::Point2f &pt2)
 {
     //printf("pt1: %f %f pt2: %f %f\n", pt1.x, pt1.y, pt2.x, pt2.y);
@@ -90,7 +108,6 @@ double FeatureTracker::distance(cv::Point2f &pt1, cv::Point2f &pt2)
     double dy = pt1.y - pt2.y;
     return sqrt(dx * dx + dy * dy);
 }
-
 map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackImage(double _cur_time, const cv::Mat &_img, const cv::Mat &_img1)
 {
     TicToc t_r;
@@ -108,7 +125,25 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     }
     */
     cur_pts.clear();
-
+    if(fisheye_mask.empty()) {
+        // fisheye_mask = cv::imread("/home/nuc/work/vins_ws/src/VINS-Fusion/config/test.jpg", 0);
+        fisheye_mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    }
+    else {
+        if(box_use_time > 3){
+            fisheye_mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+        }
+        else
+            box_use_time++;
+    }
+   
+    // if(!fisheye_mask.data)
+    // {
+    //     ROS_INFO("load mask fail");
+    //     ROS_BREAK();
+    // }
+    // else
+    //     ROS_INFO("load mask success");
     if (prev_pts.size() > 0)
     {
         TicToc t_o;
@@ -158,7 +193,8 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         reduceVector(ids, status);
         reduceVector(track_cnt, status);
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
-        //printf("track cnt %d\n", (int)ids.size());
+        // ROS_INFO("temporal optical flow costs: %fms", t_o.toc());
+        // printf("track cnt %d\n", (int)ids.size());
     }
 
     for (auto &n : track_cnt)
@@ -171,6 +207,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         TicToc t_m;
         setMask();
         ROS_DEBUG("set mask costs %fms", t_m.toc());
+        // ROS_INFO("set mask costs %fms", t_m.toc());
 
         ROS_DEBUG("detect feature begins");
         TicToc t_t;
@@ -185,15 +222,14 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         }
         else
             n_pts.clear();
-        ROS_DEBUG("detect feature costs: %f ms", t_t.toc());
+        ROS_DEBUG("detect feature costs: %fms", t_t.toc());
+        // ROS_INFO("detect feature costs: %fms", t_t.toc());
 
-        for (auto &p : n_pts)
-        {
-            cur_pts.push_back(p);
-            ids.push_back(n_id++);
-            track_cnt.push_back(1);
-        }
-        //printf("feature cnt after add %d\n", (int)ids.size());
+        ROS_DEBUG("add feature begins");
+        TicToc t_a;
+        addPoints();
+        ROS_DEBUG("selectFeature costs: %fms", t_a.toc());
+        // ROS_INFO("selectFeature costs: %fms", t_a.toc());
     }
 
     cur_un_pts = undistortedPts(cur_pts, m_camera[0]);
@@ -201,6 +237,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
 
     if(!_img1.empty() && stereo_cam)
     {
+        
         ids_right.clear();
         cur_right_pts.clear();
         cur_un_right_pts.clear();
@@ -213,9 +250,11 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             vector<uchar> status, statusRightLeft;
             vector<float> err;
             // cur left ---- cur right
+            TicToc t_right;
             cv::calcOpticalFlowPyrLK(cur_img, rightImg, cur_pts, cur_right_pts, status, err, cv::Size(21, 21), 3);
+            // ROS_INFO("right_detect feature costs: %fms", t_right.toc());
             // reverse check cur right ---- cur left
-            if(FLOW_BACK)
+            if(FLOW_BACK)//执行前向和后向光流以提高跟踪精度
             {
                 cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts, reverseLeftPts, statusRightLeft, err, cv::Size(21, 21), 3);
                 for(size_t i = 0; i < status.size(); i++)
@@ -242,9 +281,11 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             right_pts_velocity = ptsVelocity(ids_right, cur_un_right_pts, cur_un_right_pts_map, prev_un_right_pts_map);
         }
         prev_un_right_pts_map = cur_un_right_pts_map;
+        
     }
     if(SHOW_TRACK)
-        drawTrack(cur_img, rightImg, ids, cur_pts, cur_right_pts, prevLeftPtsMap);
+        // drawTrack(cur_img, rightImg, ids, cur_pts, cur_right_pts, prevLeftPtsMap);
+        drawTrack(_cur_time, cur_img, rightImg, ids, cur_pts, cur_right_pts, prevLeftPtsMap);
 
     prev_img = cur_img;
     prev_pts = cur_pts;
@@ -302,6 +343,261 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     }
 
     //printf("feature track whole time %f\n", t_r.toc());
+    // ROS_INFO("feature track whole time %f\n", t_r.toc());
+    return featureFrame;
+}
+
+map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackImage(double _cur_time, const vector<Box> &_box, const cv::Mat &_img, const cv::Mat &_img1)
+{
+    TicToc t_r;
+    cur_time = _cur_time;
+    cur_img = _img;
+    row = cur_img.rows;
+    col = cur_img.cols;
+    cv::Mat rightImg = _img1;
+    /*
+    {
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
+        clahe->apply(cur_img, cur_img);
+        if(!rightImg.empty())
+            clahe->apply(rightImg, rightImg);
+    }
+    */
+    cur_pts.clear();
+    // if(fisheye_mask.empty()){
+    //     fisheye_mask = cv::imread("/home/nuc/work/vins_ws/src/VINS-Fusion/config/test.jpg", 0);
+    // }
+    fisheye_mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    for(Box box: _box){
+        cv::Point p1, p2;
+        p1.x = box._xmin;
+        p1.y = box._ymin;
+        p2.x = box._xmax;
+        p2.y = box._ymax;
+        cv::rectangle(fisheye_mask, p1, p2, cv::Scalar(0), -1, 0);
+        cv::imshow("mask", 0.5 * fisheye_mask + 0.5 * cur_img);  //use_img
+        cv::waitKey(2);
+        std::cout << "mask_use" << std::endl;
+        box_use_time = 0;
+    }
+    // if(!fisheye_mask.data)
+    // {
+    //     ROS_INFO("load mask fail");
+    //     ROS_BREAK();
+    // }
+    // else
+    //     ROS_INFO("load mask success");
+    if (prev_pts.size() > 0)
+    {
+        TicToc t_o;
+        vector<uchar> status;
+        vector<float> err;
+        if(hasPrediction)
+        {
+            cur_pts = predict_pts;
+            cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 1, 
+            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+            
+            int succ_num = 0;
+            for (size_t i = 0; i < status.size(); i++)
+            {
+                if (status[i])
+                    succ_num++;
+            }
+            if (succ_num < 10)
+               cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
+        }
+        else
+            cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
+        // reverse check
+        if(FLOW_BACK)
+        {
+            vector<uchar> reverse_status;
+            vector<cv::Point2f> reverse_pts = prev_pts;
+            cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 1, 
+            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+            //cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 3); 
+            for(size_t i = 0; i < status.size(); i++)
+            {
+                if(status[i] && reverse_status[i] && distance(prev_pts[i], reverse_pts[i]) <= 0.5)
+                {
+                    status[i] = 1;
+                }
+                else
+                    status[i] = 0;
+            }
+        }
+
+        if(!_box.empty()){
+            for(size_t i = 0; i < status.size(); i++){
+                for(Box box:_box){
+                    if(cur_pts.at(i).x < box._xmax && cur_pts.at(i).x > box._xmin && cur_pts.at(i).y < box._ymax && cur_pts.at(i).y > box._ymin)
+                    {
+                        status[i] = 0;
+                    }
+                }
+            }
+        }
+        
+        for (int i = 0; i < int(cur_pts.size()); i++)
+            if (status[i] && !inBorder(cur_pts[i]))
+                status[i] = 0;
+        reduceVector(prev_pts, status);
+        reduceVector(cur_pts, status);
+        reduceVector(ids, status);
+        reduceVector(track_cnt, status);
+        ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
+        // ROS_INFO("temporal optical flow costs: %fms", t_o.toc());
+        // printf("track cnt %d\n", (int)ids.size());
+    }
+
+    for (auto &n : track_cnt)
+        n++;
+
+    if (1)
+    {
+        //rejectWithF();
+        ROS_DEBUG("set mask begins");
+        TicToc t_m;
+        setMask();
+        ROS_DEBUG("set mask costs %fms", t_m.toc());
+        // ROS_INFO("set mask costs %fms", t_m.toc());
+
+        ROS_DEBUG("detect feature begins");
+        TicToc t_t;
+        int n_max_cnt = MAX_CNT - static_cast<int>(cur_pts.size());
+        if (n_max_cnt > 0)
+        {
+            if(mask.empty())
+                cout << "mask is empty " << endl;
+            if (mask.type() != CV_8UC1)
+                cout << "mask type wrong " << endl;
+            cv::goodFeaturesToTrack(cur_img, n_pts, MAX_CNT - cur_pts.size(), 0.01, MIN_DIST, mask);
+        }
+        else
+            n_pts.clear();
+        ROS_DEBUG("detect feature costs: %fms", t_t.toc());
+        // ROS_INFO("detect feature costs: %fms", t_t.toc());
+
+        ROS_DEBUG("add feature begins");
+        TicToc t_a;
+        addPoints();
+        ROS_DEBUG("selectFeature costs: %fms", t_a.toc());
+        // ROS_INFO("selectFeature costs: %fms", t_a.toc());
+    }
+
+    cur_un_pts = undistortedPts(cur_pts, m_camera[0]);
+    pts_velocity = ptsVelocity(ids, cur_un_pts, cur_un_pts_map, prev_un_pts_map);
+
+    if(!_img1.empty() && stereo_cam)
+    {
+        
+        ids_right.clear();
+        cur_right_pts.clear();
+        cur_un_right_pts.clear();
+        right_pts_velocity.clear();
+        cur_un_right_pts_map.clear();
+        if(!cur_pts.empty())
+        {
+            //printf("stereo image; track feature on right image\n");
+            vector<cv::Point2f> reverseLeftPts;
+            vector<uchar> status, statusRightLeft;
+            vector<float> err;
+            // cur left ---- cur right
+            TicToc t_right;
+            cv::calcOpticalFlowPyrLK(cur_img, rightImg, cur_pts, cur_right_pts, status, err, cv::Size(21, 21), 3);
+            // ROS_INFO("right_detect feature costs: %fms", t_right.toc());
+            // reverse check cur right ---- cur left
+            if(FLOW_BACK)//执行前向和后向光流以提高跟踪精度
+            {
+                cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts, reverseLeftPts, statusRightLeft, err, cv::Size(21, 21), 3);
+                for(size_t i = 0; i < status.size(); i++)
+                {
+                    if(status[i] && statusRightLeft[i] && inBorder(cur_right_pts[i]) && distance(cur_pts[i], reverseLeftPts[i]) <= 0.5)
+                        status[i] = 1;
+                    else
+                        status[i] = 0;
+                }
+            }
+
+            ids_right = ids;
+            reduceVector(cur_right_pts, status);
+            reduceVector(ids_right, status);
+            // only keep left-right pts
+            /*
+            reduceVector(cur_pts, status);
+            reduceVector(ids, status);
+            reduceVector(track_cnt, status);
+            reduceVector(cur_un_pts, status);
+            reduceVector(pts_velocity, status);
+            */
+            cur_un_right_pts = undistortedPts(cur_right_pts, m_camera[1]);
+            right_pts_velocity = ptsVelocity(ids_right, cur_un_right_pts, cur_un_right_pts_map, prev_un_right_pts_map);
+        }
+        prev_un_right_pts_map = cur_un_right_pts_map;
+        
+    }
+    if(SHOW_TRACK)
+        // drawTrack(cur_img, rightImg, ids, cur_pts, cur_right_pts, prevLeftPtsMap);
+        drawTrack(_cur_time, cur_img, rightImg, ids, cur_pts, cur_right_pts, prevLeftPtsMap);
+
+    prev_img = cur_img;
+    prev_pts = cur_pts;
+    prev_un_pts = cur_un_pts;
+    prev_un_pts_map = cur_un_pts_map;
+    prev_time = cur_time;
+    hasPrediction = false;
+
+    prevLeftPtsMap.clear();
+    for(size_t i = 0; i < cur_pts.size(); i++)
+        prevLeftPtsMap[ids[i]] = cur_pts[i];
+
+    map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
+    for (size_t i = 0; i < ids.size(); i++)
+    {
+        int feature_id = ids[i];
+        double x, y ,z;
+        x = cur_un_pts[i].x;
+        y = cur_un_pts[i].y;
+        z = 1;
+        double p_u, p_v;
+        p_u = cur_pts[i].x;
+        p_v = cur_pts[i].y;
+        int camera_id = 0;
+        double velocity_x, velocity_y;
+        velocity_x = pts_velocity[i].x;
+        velocity_y = pts_velocity[i].y;
+
+        Eigen::Matrix<double, 7, 1> xyz_uv_velocity;
+        xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
+        featureFrame[feature_id].emplace_back(camera_id,  xyz_uv_velocity);
+    }
+
+    if (!_img1.empty() && stereo_cam)
+    {
+        for (size_t i = 0; i < ids_right.size(); i++)
+        {
+            int feature_id = ids_right[i];
+            double x, y ,z;
+            x = cur_un_right_pts[i].x;
+            y = cur_un_right_pts[i].y;
+            z = 1;
+            double p_u, p_v;
+            p_u = cur_right_pts[i].x;
+            p_v = cur_right_pts[i].y;
+            int camera_id = 1;
+            double velocity_x, velocity_y;
+            velocity_x = right_pts_velocity[i].x;
+            velocity_y = right_pts_velocity[i].y;
+
+            Eigen::Matrix<double, 7, 1> xyz_uv_velocity;
+            xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
+            featureFrame[feature_id].emplace_back(camera_id,  xyz_uv_velocity);
+        }
+    }
+
+    //printf("feature track whole time %f\n", t_r.toc());
+    // ROS_INFO("feature track whole time %f\n", t_r.toc());
     return featureFrame;
 }
 
@@ -441,7 +737,8 @@ vector<cv::Point2f> FeatureTracker::ptsVelocity(vector<int> &ids, vector<cv::Poi
     return pts_velocity;
 }
 
-void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight, 
+void FeatureTracker::drawTrack(const double &t, const cv::Mat &imLeft, const cv::Mat &imRight, 
+// void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight, 
                                vector<int> &curLeftIds,
                                vector<cv::Point2f> &curLeftPts, 
                                vector<cv::Point2f> &curRightPts,
@@ -483,6 +780,13 @@ void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight,
         }
     }
 
+    ros::Time time = ros::Time(t);
+    std_msgs::Header header;
+    header.stamp = time;
+    sensor_msgs::ImagePtr msg = cv_bridge::CvImage(header ,"bgr8",imTrack).toImageMsg();
+    sensor_msgs::Image detect_msg;
+    detect_msg = *msg;
+    pub_image.publish(detect_msg);
     //draw prediction
     /*
     for(size_t i = 0; i < predict_pts_debug.size(); i++)
@@ -492,8 +796,13 @@ void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight,
     */
     //printf("predict pts size %d \n", (int)predict_pts_debug.size());
 
+
     //cv::Mat imCur2Compress;
     //cv::resize(imCur2, imCur2Compress, cv::Size(cols, rows / 2));
+
+    // turn the following code on if you need
+    cv::imshow("tracking", imTrack);  //use_img
+    cv::waitKey(2);
 }
 
 

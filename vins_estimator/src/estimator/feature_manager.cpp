@@ -180,13 +180,16 @@ VectorXd FeatureManager::getDepthVector()
 {
     VectorXd dep_vec(getFeatureCount());
     int feature_index = -1;
+    // int i = 0;
     for (auto &it_per_id : feature)
     {
+        // i++;
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (it_per_id.used_num < 4)
             continue;
 #if 1
         dep_vec(++feature_index) = 1. / it_per_id.estimated_depth;
+        // std::cout << "count:" << i << " " << "depth:" << it_per_id.estimated_depth << std::endl;
 #else
         dep_vec(++feature_index) = it_per_id->estimated_depth;
 #endif
@@ -314,14 +317,18 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
             leftPose.leftCols<3>() = R0.transpose();
             leftPose.rightCols<1>() = -R0.transpose() * t0;
-            //cout << "left pose " << leftPose << endl;
+            // cout << "left pose (imu)" << t0.transpose() << endl;
+            // cout << "left pose " << leftPose << endl;
+            // cout << "left ric" << ric[0] << endl;
 
             Eigen::Matrix<double, 3, 4> rightPose;
             Eigen::Vector3d t1 = Ps[imu_i] + Rs[imu_i] * tic[1];
             Eigen::Matrix3d R1 = Rs[imu_i] * ric[1];
             rightPose.leftCols<3>() = R1.transpose();
             rightPose.rightCols<1>() = -R1.transpose() * t1;
-            //cout << "right pose " << rightPose << endl;
+            // cout << "right ric" << ric[1] << endl;
+            // cout << "right pose (imu)" << t1.transpose() << endl;
+            // cout << "right pose " << rightPose << endl;
 
             Eigen::Vector2d point0, point1;
             Eigen::Vector3d point3d;
